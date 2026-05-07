@@ -1,59 +1,23 @@
-# 使用 GitHub Copilot 作为终端 CLI 的 LLM 后端
+# 用 Claude CLI 跑你的 GitHub Copilot 订阅
 
 语言版本：[🇺🇸 English](README.md)。
 
-有两个 CLI 工具可以让你在终端中驱动 LLM 会话，并将费用计入你的
-**GitHub Copilot 订阅**，而不是直接向 Anthropic 或 OpenAI 付费：
+本方案把 **Claude Code CLI** 接到一个本地代理上；该代理负责在
+Anthropic 协议与 GitHub Copilot 的 OpenAI 风格 API 之间做翻译。这样
+你的 Claude REPL 会话最终消耗的是 **GitHub Copilot 订阅**额度，而
+不是直接向 `api.anthropic.com` 付费。
 
-| CLI | 可执行文件 | 后端 | 风格 |
-|---|---|---|---|
-| `copilot` | `~/.local/bin/copilot` | GitHub Copilot CLI（官方） | GitHub 原生、智能体式、技能驱动 |
-| `claude-c` | `~/.profile` 中的 shell 函数 | Claude Code CLI 通过本地 OpenAI 兼容代理 | Claude Code 体验，模型路由由你掌控 |
-
-两者最终都消耗你的 Copilot 配额。请根据任务挑选合适的工具。
-
----
-
-## 1. `copilot` —— 官方 GitHub Copilot CLI
-
-### 安装
-
-该二进制是一个完整的自包含可执行文件。把它放到 `PATH` 上即可：
-
-```bash
-# ~/.local/bin/copilot 已经是一个 149 MB 的可执行文件
-chmod +x ~/.local/bin/copilot
-copilot --version
-# GitHub Copilot CLI 1.0.42.
-```
-
-到此为止。没有代理、没有配置折腾、没有需要考虑的模型路由。
-
-### 首次运行
-
-```bash
-copilot
-```
-
-首次调用会打印一个 URL 和一个 **6 位字母授权码**。在浏览器中打开
-该 URL，粘贴授权码，并在 GitHub 上批准 OAuth 授权。完成后会进入
-交互式设置，让你选择：
-
-1. **LLM 模式** —— 默认使用哪个提供商/模型族（Claude、GPT、
-   Gemini 等）。
-2. **小模型** —— 用于后台调用（子代理、快速校验、补全）的
-   廉价模型。
-
-这些选择会被持久化，后续运行将直接进入会话。
+> GitHub 也提供官方 `copilot` CLI —— 单一二进制、原生对接 Copilot、
+> 通过 MCP 暴露工具，并自带一批智能体式技能（评审 PR、修复后跑 CI、
+> 分诊 issue）。当工作偏 GitHub 形态时用它。下面这套方案则面向所有
+> 想保留熟悉的 Claude Code REPL 体验的人。
 
 ---
 
-## 2. `claude-c` —— 通过 `copilot-api` 路由的 Claude Code
+## `claude-c` —— 通过 `copilot-api` 路由的 Claude Code
 
-这一种**有意保留 Claude Code CLI 本体**，只是重新接线，让它的
-HTTP 流量终结于一个本地代理；该代理负责在 Anthropic 协议与
-GitHub Copilot 的 OpenAI 风格 API 之间做翻译。你得到的是标准的
-`claude` REPL、斜杠命令、键位绑定 —— 但费用计入 Copilot。
+你得到的是标准的 `claude` REPL、斜杠命令、键位绑定 —— 但费用计入
+Copilot。
 
 ### 组件结构
 
@@ -81,11 +45,20 @@ Claude Code CLI 已经在磁盘上：
 
 #### 第 2 步 —— 安装 `copilot-api`
 
+我们使用 **`@jeffreycao/copilot-api`** 这个 fork，它原生支持
+Anthropic Messages 协议，暴露更新的上游模型（`gpt-5.4`、`gpt-5.5`、
+`gpt-5.3-codex`、`gemini-3.1-pro-preview`、`grok-code-fast-1`、
+`claude-opus-4.6-fast`），并自带用量看板：
+
 ```bash
-npm install -g copilot-api
+npm install -g @jeffreycao/copilot-api
 which copilot-api
 # /home/user/.nvm/versions/node/v24.14.1/bin/copilot-api
 ```
+
+安装出来的可执行仍叫 `copilot-api`，所以本指南后续步骤与随附的
+systemd unit 都无需改动。原版 `copilot-api`（ericc-ch）协议兼容；
+若偏好原版，把这条 install 命令换掉即可。
 
 #### 第 3 步 —— 让 `copilot-api` 通过 GitHub 鉴权
 
@@ -93,8 +66,8 @@ which copilot-api
 copilot-api auth
 ```
 
-这会打印一个 URL 和一个 **6 位字母授权码**，与上面 `copilot` CLI
-的流程完全一致。在浏览器中批准 OAuth 授权。令牌将写入：
+这会打印一个 URL 和一个 **6 位字母授权码**。在浏览器中批准 OAuth
+授权。令牌将写入：
 
 ```
 ~/.local/share/copilot-api/github_token
@@ -115,9 +88,13 @@ copilot-api start --claude-code
 ```
 
 启动时代理会输出 `Logged in as <你的-gh-账号>`，并打印它能转发到
-的上游模型清单 —— 包括 `claude-opus-4.6`、`claude-opus-4.7`、
-`claude-sonnet-4.6`、`gemini-3-flash-preview`、`gpt-5.x` 等等。让它
-保持运行（用 `tmux`、`systemd --user` 或后台终端，都行）。
+的上游模型清单。它还在以下地址提供一个实时用量看板：
+
+```
+http://localhost:4141/usage-viewer?endpoint=http://localhost:4141/usage
+```
+
+让代理保持运行（用 `tmux`、`systemd --user` 或后台终端，都行）。
 
 如需无人值守的部署，把仓库自带的
 [`copilot-api.service`](copilot-api.service) 拷贝到
@@ -204,11 +181,7 @@ claude-d                  # Claude Code，Anthropic 计费
 
 ---
 
-## 何时用哪个
-
-两者花的都是同一份 Copilot 配额，但使用感受截然不同。
-
-### `claude-c` 的优势
+## 这套方案的好处
 
 - **熟悉**。如果你已经在日常使用 Claude Code，`claude-c` 就是同一个
   REPL、同一套斜杠命令、同样的计划模式 UX、同样的键位绑定。无需
@@ -222,28 +195,8 @@ claude-d                  # Claude Code，Anthropic 计费
   不会互相污染。
 - **本地代理，全程可见**。`copilot-api` 跑在你自己的机器上；
   `--verbose` 会输出每个请求、模型和 token 计数。容易调试、容易
-  限速（`-r`）、容易切换账户类型（`-a business`）。
-
-### `copilot` 的优势
-
-- **零管路**。一个二进制、一个 OAuth 流程、一个交互式选择器。
-  没有代理需要常驻、没有环境变量要管理、没有独立配置目录。
-- **原生 GitHub 集成**。开箱即可推理 repo、PR、issue、Actions
-  运行 —— 而且不需要 MCP 桥接，因为它本身就是 GitHub 的客户端。
-- **内置技能与代理**。CLI 自带一批精选的技能/自动化和一个代理
-  运行时，能为常见工程任务（评审-PR、修复-后跑-CI、分诊-issue）
-  串联工具调用，而无需你自己接线。
-- **官方支持**。更新通过 `copilot update` 落地；与 GitHub Copilot
-  的契约从定义上就稳定 —— 因为两端都是 GitHub 出的。
-
-### 经验法则
-
-- 当工作是纯代码/文本、并且你想要熟悉的 Claude Code 体验时
-  （计划、编辑、多步重构、深度文件树探索），用 **`claude-c`**。
-- 当工作是 GitHub 形态的（涉及 PR、issue、Actions、仓库元数据），
-  或你想调用 GitHub 的某个预置代理式技能时，用 **`copilot`**。
-
-两者可以同时安装，互不冲突。
+  限速（`-r`）、容易切换账户类型（`-a business`）。`/usage-viewer`
+  看板还能实时看配额消耗情况。
 
 ---
 
@@ -256,10 +209,15 @@ claude-d                  # Claude Code，Anthropic 计费
 | 会话列表中 Copilot 与 Anthropic 聊天混在一起 | 没设置 `CLAUDE_CONFIG_DIR` | 重新加载 `~/.profile`；在 `claude-c` 内部用 `echo $CLAUDE_CONFIG_DIR` 确认 |
 | 配额消耗比预期快 | 后台遥测调用 | 确认已导出 `DISABLE_NON_ESSENTIAL_MODEL_CALLS=1` 与 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` |
 | `copilot-api auth` 反复要求登录 | 令牌文件权限错误或已损坏 | `chmod 600 ~/.local/share/copilot-api/github_token`；若文件损坏，删除后重新鉴权 |
-| `copilot` 每次启动都重新走鉴权 | 登录状态丢失 | 重新走交互式设置，再次选择 LLM 模式与小模型 |
 
 随时可以查询当前 Copilot 用量：
 
 ```bash
 copilot-api check-usage
+```
+
+……或者打开实时看板：
+
+```
+http://localhost:4141/usage-viewer?endpoint=http://localhost:4141/usage
 ```
