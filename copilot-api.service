@@ -1,0 +1,15 @@
+[Unit]
+Description=Copilot API Proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/user/.nvm/versions/node/v24.14.1/bin/copilot-api start --port 4141
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
