@@ -39,7 +39,7 @@ copilot-api            →  来自 npm 的 Node 工具；面向 GitHub Copilot �
 Claude Code CLI 已经在磁盘上：
 
 ```
-~/.local/bin/claude → ~/.local/share/claude/versions/2.1.126
+~/.local/bin/claude → ~/.local/share/claude/versions/2.1.158
 ```
 
 如果还没有安装，请使用官方安装器；这一步和 Copilot 没有特殊关系。
@@ -47,14 +47,15 @@ Claude Code CLI 已经在磁盘上：
 #### 第 2 步 —— 安装 `copilot-api`
 
 这里使用 **`@jeffreycao/copilot-api`** 这个 fork。它增加了原生
-Anthropic Messages 支持，暴露更新的上游模型（`gpt-5.4`、`gpt-5.5`、
-`gpt-5.3-codex`、`gemini-3.1-pro-preview`、`grok-code-fast-1`、
-`claude-opus-4.6-fast`），并内置用量面板：
+Anthropic Messages 支持，暴露更新的上游模型（`claude-opus-4.8`、
+`claude-sonnet-4.6`、`gemini-3.5-flash`、`gpt-5.3-codex`、
+`gpt-5.4`、`gpt-5.5`），并内置用量面板。本机当前使用的是
+`@jeffreycao/copilot-api@1.10.28`。
 
 ```bash
 npm install -g @jeffreycao/copilot-api
 which copilot-api
-# /home/user/.nvm/versions/node/v24.14.1/bin/copilot-api
+# /home/peter/.nvm/versions/node/v24.14.1/bin/copilot-api
 ```
 
 安装后的执行文件仍然叫 `copilot-api`，所以本指南后续步骤和随附的
@@ -150,7 +151,8 @@ mkdir -p ~/.claude-copilot
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`，避免 Claude Code 把配额
   花在非必要的后台请求上；
 - 用子 shell `( ... )` 包住这些环境变量，避免它们泄漏回交互式 shell；
-- 最后用 `exec` 启动 `claude`，避免多出一层包装进程。
+- 最后用 `exec` 启动 `claude --effort high`，避免多出一层包装进程，并让
+  默认会话请求 high effort。
 
 实际安装的函数如下：
 
@@ -159,17 +161,17 @@ claude-c() (
     export CLAUDE_CONFIG_DIR="$HOME/.claude-copilot" \
         ANTHROPIC_BASE_URL=http://localhost:4141 \
         ANTHROPIC_AUTH_TOKEN=dummy \
-        ANTHROPIC_MODEL=claude-opus-4.7 \
+        ANTHROPIC_MODEL=claude-opus-4.8 \
         ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.6 \
-        ANTHROPIC_SMALL_FAST_MODEL=gemini-3-flash-preview \
-        ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3-flash-preview \
+        ANTHROPIC_SMALL_FAST_MODEL=gemini-3.5-flash \
+        ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.5-flash \
         DISABLE_NON_ESSENTIAL_MODEL_CALLS=1 \
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-    exec /home/user/.local/bin/claude "$@"
+    exec /home/peter/.local/bin/claude --effort high "$@"
 )
 
 # 反向配置：同一个执行文件，但连接 api.anthropic.com，按 Anthropic 额度计费
-alias claude-d='unset CLAUDE_CONFIG_DIR ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL DISABLE_NON_ESSENTIAL_MODEL_CALLS CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC && /home/user/.local/bin/claude'
+alias claude-d='unset CLAUDE_CONFIG_DIR ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL DISABLE_NON_ESSENTIAL_MODEL_CALLS CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC && /home/peter/.local/bin/claude'
 ```
 
 加载 profile（`. ~/.profile` 或打开一个新 shell），确认
@@ -178,6 +180,136 @@ alias claude-d='unset CLAUDE_CONFIG_DIR ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN 
 ```bash
 claude-c                  # Claude Code，计入 Copilot
 claude-d                  # Claude Code，计入 Anthropic
+```
+
+### 模型和 thinking level
+
+`claude-c` 默认从 `claude-opus-4.8` 启动，并请求 Claude Code 使用 high
+effort：
+
+```bash
+claude-c
+```
+
+如果要启动时指定另一个模型，可以传 Claude Code 的 model 参数：
+
+```bash
+claude-c --model claude-sonnet-4.6
+claude-c --model gemini-3.5-flash
+```
+
+进入 REPL 后，可以用 `/model` 在 Anthropic 兼容路由暴露的模型之间切换。
+在这套配置里，实际常用的选择是 `claude-opus-4.8`、
+`claude-sonnet-4.6` 和 `gemini-3.5-flash`。
+
+Thinking level 可以在 REPL 里用 `/effort` 调整，例如：
+
+```text
+/effort medium
+/effort high
+```
+
+也可以在启动时指定：
+
+```bash
+claude-c --effort medium
+claude-c --effort high
+```
+
+Claude Code 会把 Copilot 模式的设置写在
+`~/.claude-copilot/settings.json`；这套配置把 `effortLevel` 保持为
+`high`。
+
+需要注意一个代理层细节：GitHub Copilot 当前返回的模型元数据中，
+`claude-opus-4.8` 只声明 `reasoning_effort=["medium"]`。代理会把
+Anthropic Messages 中不受支持的 effort 限制到模型声明的能力内，所以
+即使 `claude-c` 请求 high，Opus 4.8 实际发送给上游的也是 medium。
+`claude-sonnet-4.6` 和 `gemini-3.5-flash` 声明支持 high effort，因此可以
+按 high effort 工作。
+
+`curl http://127.0.0.1:4141/v1/models` 看到的是本地代理转换后的
+OpenAI 兼容视图。如果要查看 GitHub Copilot 原始的模型报告，需要先把
+本地保存的 GitHub OAuth token 换成 Copilot token，然后直接请求
+`https://api.githubcopilot.com/models`：
+
+```bash
+node <<'NODE'
+const fs = require("fs");
+const crypto = require("crypto");
+
+const githubToken = fs.readFileSync(
+  `${process.env.HOME}/.local/share/copilot-api/github_token`,
+  "utf8",
+).trim();
+const userAgent = "GitHubCopilotChat/0.50.1";
+
+async function main() {
+  const tokenResp = await fetch("https://api.github.com/copilot_internal/v2/token", {
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `token ${githubToken}`,
+      "user-agent": userAgent,
+      "x-github-api-version": "2022-11-28",
+      "x-vscode-user-agent-library-version": "electron-fetch",
+    },
+  });
+  if (!tokenResp.ok) throw new Error(`token ${tokenResp.status}: ${await tokenResp.text()}`);
+  const { token } = await tokenResp.json();
+
+  const requestId = crypto.randomUUID();
+  const modelsResp = await fetch("https://api.githubcopilot.com/models", {
+    headers: {
+      authorization: `Bearer ${token}`,
+      "copilot-integration-id": "vscode-chat",
+      "editor-version": "vscode/1.122.1",
+      "editor-plugin-version": "copilot-chat/0.50.1",
+      "user-agent": userAgent,
+      "openai-intent": "model-access",
+      "x-github-api-version": "2026-01-09",
+      "x-request-id": requestId,
+      "x-vscode-user-agent-library-version": "electron-fetch",
+      "x-agent-task-id": requestId,
+      "x-interaction-type": "model-access",
+    },
+  });
+  if (!modelsResp.ok) throw new Error(`models ${modelsResp.status}: ${await modelsResp.text()}`);
+  console.log(JSON.stringify(await modelsResp.json(), null, 2));
+}
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});
+NODE
+```
+
+如果要查看本地代理转换后的模型列表：
+
+```bash
+curl -s http://127.0.0.1:4141/v1/models |
+  node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); for (const m of j.data||[]) console.log(m.id, JSON.stringify(m.capabilities?.supports?.reasoning_effort ?? null));})'
+```
+
+如果只想快速检查 `claude-c` 当前使用的几个模型：
+
+```bash
+curl -s http://127.0.0.1:4141/v1/models |
+  node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); for (const id of ["claude-opus-4.8","claude-sonnet-4.6","gemini-3.5-flash"]) { const m=(j.data||[]).find(x=>x.id===id); console.log(id, m?.capabilities?.supports?.reasoning_effort || null); }})'
+```
+
+如果要更新 `claude-c` 使用的模型，编辑 `~/.profile` 里的这些模型别名：
+
+```bash
+ANTHROPIC_MODEL=claude-opus-4.8
+ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.6
+ANTHROPIC_SMALL_FAST_MODEL=gemini-3.5-flash
+ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.5-flash
+```
+
+然后重新加载 shell 配置，或者打开一个新 shell：
+
+```bash
+. ~/.profile
 ```
 
 ---

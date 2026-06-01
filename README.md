@@ -40,7 +40,7 @@ copilot-api            →  Node tool from npm; OpenAI-compatible proxy
 The Claude Code CLI is already on disk:
 
 ```
-~/.local/bin/claude → ~/.local/share/claude/versions/2.1.126
+~/.local/bin/claude → ~/.local/share/claude/versions/2.1.158
 ```
 
 Install it via the official installer if you don't have it; nothing
@@ -50,14 +50,14 @@ about that step is Copilot-specific.
 
 We use the **`@jeffreycao/copilot-api`** fork, which adds native
 Anthropic-Messages support, exposes newer upstream models
-(`gpt-5.4`, `gpt-5.5`, `gpt-5.3-codex`, `gemini-3.1-pro-preview`,
-`grok-code-fast-1`, `claude-opus-4.6-fast`), and ships a built-in
-usage dashboard:
+(`claude-opus-4.8`, `claude-sonnet-4.6`, `gemini-3.5-flash`,
+`gpt-5.3-codex`, `gpt-5.4`, `gpt-5.5`), and ships a built-in usage
+dashboard. The local setup here is on `@jeffreycao/copilot-api@1.10.28`.
 
 ```bash
 npm install -g @jeffreycao/copilot-api
 which copilot-api
-# /home/user/.nvm/versions/node/v24.14.1/bin/copilot-api
+# /home/peter/.nvm/versions/node/v24.14.1/bin/copilot-api
 ```
 
 The installed binary is still called `copilot-api`, so the rest of
@@ -161,7 +161,8 @@ This is the glue. The function:
   not spend quota on telemetry-style background pings,
 - wraps everything in a subshell `( ... )` so the env exports do not
   leak back into your interactive shell,
-- finally `exec`s `claude` so there is no extra wrapper process.
+- finally `exec`s `claude --effort high` so there is no extra wrapper
+  process and the default session asks for high effort.
 
 The exact function as installed:
 
@@ -170,17 +171,17 @@ claude-c() (
     export CLAUDE_CONFIG_DIR="$HOME/.claude-copilot" \
         ANTHROPIC_BASE_URL=http://localhost:4141 \
         ANTHROPIC_AUTH_TOKEN=dummy \
-        ANTHROPIC_MODEL=claude-opus-4.7 \
+        ANTHROPIC_MODEL=claude-opus-4.8 \
         ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.6 \
-        ANTHROPIC_SMALL_FAST_MODEL=gemini-3-flash-preview \
-        ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3-flash-preview \
+        ANTHROPIC_SMALL_FAST_MODEL=gemini-3.5-flash \
+        ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.5-flash \
         DISABLE_NON_ESSENTIAL_MODEL_CALLS=1 \
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-    exec /home/user/.local/bin/claude "$@"
+    exec /home/peter/.local/bin/claude --effort high "$@"
 )
 
 # inverse: same binary, talking to api.anthropic.com on Anthropic credits
-alias claude-d='unset CLAUDE_CONFIG_DIR ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL DISABLE_NON_ESSENTIAL_MODEL_CALLS CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC && /home/user/.local/bin/claude'
+alias claude-d='unset CLAUDE_CONFIG_DIR ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL DISABLE_NON_ESSENTIAL_MODEL_CALLS CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC && /home/peter/.local/bin/claude'
 ```
 
 Source the profile (`. ~/.profile` or open a new shell), make sure
@@ -189,6 +190,138 @@ Source the profile (`. ~/.profile` or open a new shell), make sure
 ```bash
 claude-c                  # Claude Code, Copilot-billed
 claude-d                  # Claude Code, Anthropic-billed
+```
+
+### Model and thinking level
+
+`claude-c` starts on `claude-opus-4.8` and asks Claude Code for high
+effort by default:
+
+```bash
+claude-c
+```
+
+To start on another model, pass Claude Code's model flag:
+
+```bash
+claude-c --model claude-sonnet-4.6
+claude-c --model gemini-3.5-flash
+```
+
+Inside the REPL, use `/model` to switch between the models exposed by
+the Anthropic-compatible route. For this setup, the practical choices
+are `claude-opus-4.8`, `claude-sonnet-4.6`, and `gemini-3.5-flash`.
+
+Thinking level can be adjusted inside the REPL with `/effort`, for
+example:
+
+```text
+/effort medium
+/effort high
+```
+
+It can also be set when launching:
+
+```bash
+claude-c --effort medium
+claude-c --effort high
+```
+
+Claude Code also stores Copilot-mode settings under
+`~/.claude-copilot/settings.json`; this setup keeps `effortLevel` at
+`high`.
+
+One important gateway detail: GitHub Copilot's model metadata currently
+advertises `claude-opus-4.8` with only `reasoning_effort=["medium"]`.
+The gateway clamps unsupported Anthropic Messages effort to the
+advertised model capability, so Opus 4.8 receives medium effort even
+though `claude-c` requests high. `claude-sonnet-4.6` and
+`gemini-3.5-flash` advertise high effort and can honor it.
+
+`curl http://127.0.0.1:4141/v1/models` shows the local gateway's
+OpenAI-compatible view. To inspect the original GitHub Copilot model
+report, fetch `https://api.githubcopilot.com/models` directly after
+exchanging the stored GitHub OAuth token for a Copilot token:
+
+```bash
+node <<'NODE'
+const fs = require("fs");
+const crypto = require("crypto");
+
+const githubToken = fs.readFileSync(
+  `${process.env.HOME}/.local/share/copilot-api/github_token`,
+  "utf8",
+).trim();
+const userAgent = "GitHubCopilotChat/0.50.1";
+
+async function main() {
+  const tokenResp = await fetch("https://api.github.com/copilot_internal/v2/token", {
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `token ${githubToken}`,
+      "user-agent": userAgent,
+      "x-github-api-version": "2022-11-28",
+      "x-vscode-user-agent-library-version": "electron-fetch",
+    },
+  });
+  if (!tokenResp.ok) throw new Error(`token ${tokenResp.status}: ${await tokenResp.text()}`);
+  const { token } = await tokenResp.json();
+
+  const requestId = crypto.randomUUID();
+  const modelsResp = await fetch("https://api.githubcopilot.com/models", {
+    headers: {
+      authorization: `Bearer ${token}`,
+      "copilot-integration-id": "vscode-chat",
+      "editor-version": "vscode/1.122.1",
+      "editor-plugin-version": "copilot-chat/0.50.1",
+      "user-agent": userAgent,
+      "openai-intent": "model-access",
+      "x-github-api-version": "2026-01-09",
+      "x-request-id": requestId,
+      "x-vscode-user-agent-library-version": "electron-fetch",
+      "x-agent-task-id": requestId,
+      "x-interaction-type": "model-access",
+    },
+  });
+  if (!modelsResp.ok) throw new Error(`models ${modelsResp.status}: ${await modelsResp.text()}`);
+  console.log(JSON.stringify(await modelsResp.json(), null, 2));
+}
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});
+NODE
+```
+
+For the gateway-normalized local view:
+
+```bash
+curl -s http://127.0.0.1:4141/v1/models |
+  node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); for (const m of j.data||[]) console.log(m.id, JSON.stringify(m.capabilities?.supports?.reasoning_effort ?? null));})'
+```
+
+For a compact check of the models used by `claude-c`:
+
+```bash
+curl -s http://127.0.0.1:4141/v1/models |
+  node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); for (const id of ["claude-opus-4.8","claude-sonnet-4.6","gemini-3.5-flash"]) { const m=(j.data||[]).find(x=>x.id===id); console.log(id, m?.capabilities?.supports?.reasoning_effort || null); }})'
+```
+
+To update the models used by `claude-c`, edit the model aliases in
+`~/.profile`:
+
+```bash
+ANTHROPIC_MODEL=claude-opus-4.8
+ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.6
+ANTHROPIC_SMALL_FAST_MODEL=gemini-3.5-flash
+ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.5-flash
+```
+
+Then reload the shell config or open a new shell:
+
+```bash
+. ~/.profile
 ```
 
 ---
