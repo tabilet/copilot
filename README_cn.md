@@ -1,6 +1,8 @@
 # 通过 Claude CLI 使用 GitHub Copilot 订阅
 
 语言版本：[🇺🇸 English](README.md)。
+姊妹篇：[`DSH_cn.md`](DSH_cn.md) —— 用同一个 Copilot 订阅驱动
+`dsh`（DeepSeek Harness），并提供一个终端聊天入口。
 
 这份指南会把 **Claude Code CLI** 接到一个本地代理上。代理负责在
 Anthropic 协议和 GitHub Copilot 的 OpenAI 风格 API 之间转换请求，

@@ -1,6 +1,8 @@
 # Using the Claude CLI with a GitHub Copilot Subscription
 
 Language versions: [🇨🇳 中文](README_cn.md).
+Companion recipe: [`DSH.md`](DSH.md) — the same Copilot subscription
+driving `dsh` (DeepSeek Harness), with a terminal chat front door.
 
 This recipe wires the **Claude Code CLI** to a local proxy that
 translates between the Anthropic protocol and GitHub Copilot's
