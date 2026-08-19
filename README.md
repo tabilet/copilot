@@ -40,7 +40,7 @@ copilot-api            →  Node tool from npm; OpenAI-compatible proxy
 The Claude Code CLI is already on disk:
 
 ```
-~/.local/bin/claude → ~/.local/share/claude/versions/2.1.158
+~/.local/bin/claude → ~/.local/share/claude/versions/2.1.235
 ```
 
 Install it via the official installer if you don't have it; nothing
@@ -197,6 +197,43 @@ Source the profile (`. ~/.profile` or open a new shell), make sure
 claude-c                  # Claude Code, Copilot-billed
 claude-d                  # Claude Code, Anthropic-billed
 ```
+
+### `claude-c.sh` — the same thing as a sourceable snippet
+
+This repo ships the pair as [`claude-c.sh`](claude-c.sh), so you do not
+have to paste shell functions out of a README. It is credential-free —
+`copilot-api` authenticates upstream with the GitHub OAuth token it
+stores itself — so it is safe to keep in version control.
+
+```bash
+# in ~/.profile, replacing the inline function above
+. /path/to/claude-c.sh
+```
+
+Every setting is an override-before-sourcing variable, so you can point
+it at different models or a different port without editing the file:
+
+| Variable | Default |
+| --- | --- |
+| `CLAUDE_C_BIN` | `$HOME/.local/bin/claude` (falls back to `claude` on `PATH`) |
+| `CLAUDE_C_CONFIG_DIR` | `$HOME/.claude-copilot` |
+| `CLAUDE_C_BASE_URL` | `http://localhost:4141` |
+| `CLAUDE_C_EFFORT` | `high` |
+| `CLAUDE_C_MODEL` | `claude-fable-5` |
+| `CLAUDE_C_SONNET_MODEL` | `claude-sonnet-5` |
+| `CLAUDE_C_FAST_MODEL` | `gemini-3.7-flash` (both the small-fast and Haiku aliases) |
+
+```bash
+# e.g. a cheaper session, without touching the file
+CLAUDE_C_MODEL=claude-sonnet-5 claude-c
+```
+
+Two deliberate differences from the inline version above: `claude-d` is
+a function rather than an alias (aliases do not expand in non-interactive
+shells), and it strips the Copilot variables with `env -u` instead of
+`unset`, so it works whether or not they were exported. The snippet needs
+bash or zsh — the hyphen in `claude-c` is not a legal function name in
+POSIX `sh`.
 
 ### Models exposed by the gateway
 

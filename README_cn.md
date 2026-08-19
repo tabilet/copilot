@@ -39,7 +39,7 @@ copilot-api            →  来自 npm 的 Node 工具；面向 GitHub Copilot �
 Claude Code CLI 已经在磁盘上：
 
 ```
-~/.local/bin/claude → ~/.local/share/claude/versions/2.1.158
+~/.local/bin/claude → ~/.local/share/claude/versions/2.1.235
 ```
 
 如果还没有安装，请使用官方安装器；这一步和 Copilot 没有特殊关系。
@@ -187,6 +187,40 @@ alias claude-d='unset CLAUDE_CONFIG_DIR ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN 
 claude-c                  # Claude Code，计入 Copilot
 claude-d                  # Claude Code，计入 Anthropic
 ```
+
+### `claude-c.sh` —— 可直接 source 的脚本
+
+仓库里带了这两个函数：[`claude-c.sh`](claude-c.sh)，不用再从 README 里
+复制粘贴。文件本身不含任何凭据（`copilot-api` 用它自己保存的 GitHub
+OAuth token 对上游认证），可以放心提交到版本库。
+
+```bash
+# 写在 ~/.profile 里，替代上面内联的函数
+. /path/to/claude-c.sh
+```
+
+所有配置都是「source 之前可覆盖」的变量，因此换模型或换端口都不需要改
+文件本身：
+
+| 变量 | 默认值 |
+| --- | --- |
+| `CLAUDE_C_BIN` | `$HOME/.local/bin/claude`（找不到则回退到 `PATH` 上的 `claude`） |
+| `CLAUDE_C_CONFIG_DIR` | `$HOME/.claude-copilot` |
+| `CLAUDE_C_BASE_URL` | `http://localhost:4141` |
+| `CLAUDE_C_EFFORT` | `high` |
+| `CLAUDE_C_MODEL` | `claude-fable-5` |
+| `CLAUDE_C_SONNET_MODEL` | `claude-sonnet-5` |
+| `CLAUDE_C_FAST_MODEL` | `gemini-3.7-flash`（同时用于 small-fast 和 Haiku 两个别名） |
+
+```bash
+# 例如临时用便宜一点的模型，不改文件
+CLAUDE_C_MODEL=claude-sonnet-5 claude-c
+```
+
+和上面内联版本有两处刻意的差别：`claude-d` 是函数而不是 alias（alias 在
+非交互 shell 里不会展开），并且它用 `env -u` 而不是 `unset` 来剥离
+Copilot 相关变量，所以无论这些变量有没有被导出都能正常工作。这个脚本需要
+bash 或 zsh —— `claude-c` 里的连字符在 POSIX `sh` 里不是合法的函数名。
 
 ### 网关当前暴露的模型
 
