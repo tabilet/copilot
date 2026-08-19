@@ -14,6 +14,9 @@ Two independent parts:
 2. [A terminal chat front door](#part-2--a-terminal-chat-front-door) —
    `dsh-tui`, for a Claude-Code-style REPL over SSH.
 
+Plus [`dsh-web.sh`](dsh-web.sh), a launcher for your own machine that
+tunnels to the server's web UI and opens it in your browser.
+
 Versions this was written against: `@deepseek-ai/dsh@0.1.0-rc.7`,
 `@lujianjun19/dsh-llm-github-copilot@0.3.6`,
 `@deepseek-harness-tui/dsh-tui@0.8.4`. This ecosystem moves daily.
@@ -187,6 +190,45 @@ The adapter talks straight to `api.githubcopilot.com`. It does **not**
 pass through the local `copilot-api` proxy on `:4141`, so `dsh` usage
 never appears in that proxy's usage viewer even though both draw down
 the same Copilot subscription. Budget accordingly.
+
+---
+
+## Reaching the web UI from your laptop
+
+`dsh web` binds `127.0.0.1:3080` on the server, so the browser that has
+to talk to it is on the wrong machine. [`dsh-web.sh`](dsh-web.sh) — a
+local script, run on your laptop, not the server — closes that gap with
+a single SSH connection that both forwards the port and starts the
+remote server:
+
+```bash
+cp dsh-web.sh ~/.local/bin/dsh-web && chmod +x ~/.local/bin/dsh-web
+export DSH_WEB_REMOTE=peter@your-server     # in ~/.profile
+dsh-web
+```
+
+It forwards a local port to the server's loopback, starts `dsh web`
+over the same session, waits for the tunnel to answer, and hands the URL
+to your browser. Ctrl-C closes the connection and stops the remote
+process with it. If your local 3080 is busy it moves up to the next free
+port and adjusts the URL, so a local `dsh web` and a remote one can run
+side by side.
+
+| Variable | Default |
+| --- | --- |
+| `DSH_WEB_REMOTE` | *(required)* `user@host`, or an `~/.ssh/config` alias |
+| `DSH_WEB_REMOTE_PORT` | `3080` — what `dsh` binds on the server |
+| `DSH_WEB_LOCAL_PORT` | first free port at or above the remote port |
+| `DSH_WEB_OPEN` | `1`; set `0` to skip the browser |
+
+Arguments after `--` reach `dsh web` itself:
+`dsh-web myhost -- --trusted-host example.test`.
+
+One thing the script exists to work around: `dsh` is installed under
+nvm, and nvm's PATH setup lives in `~/.bashrc`, which Ubuntu's own guard
+skips for non-interactive shells. A plain `ssh host dsh web` therefore
+fails with `command not found`. The script sources `nvm.sh` explicitly
+when the bare command is missing.
 
 ---
 

@@ -14,6 +14,9 @@ Copilot 订阅** 上计费，而不是走 DeepSeek API，并且在终端里使�
 2. [终端聊天入口](#第-2-部分终端聊天入口)——`dsh-tui`，
    在 SSH 上获得类似 Claude Code 的 REPL。
 
+另外还有 [`dsh-web.sh`](dsh-web.sh)：跑在你自己电脑上的启动器，
+自动建立到服务器 web UI 的隧道并打开浏览器。
+
 本文对应的版本：`@deepseek-ai/dsh@0.1.0-rc.7`、
 `@lujianjun19/dsh-llm-github-copilot@0.3.6`、
 `@deepseek-harness-tui/dsh-tui@0.8.4`。这套生态每天都在变。
@@ -178,6 +181,41 @@ dsh --profile web    # 进入聊天后执行：/copilot-status
 适配器直连 `api.githubcopilot.com`，**不会**经过本地 `:4141` 上的
 `copilot-api` 代理。因此即使两者消耗的是同一个 Copilot 订阅，
 `dsh` 的用量也不会出现在那个代理的用量面板里。做预算时要记得。
+
+---
+
+## 从本地电脑访问 web UI
+
+`dsh web` 监听的是服务器上的 `127.0.0.1:3080`，而需要访问它的浏览器
+却在另一台机器上。[`dsh-web.sh`](dsh-web.sh) 就是用来补这一段的：
+它跑在你自己的电脑上（不是服务器上），用一条 SSH 连接同时完成端口
+转发和启动远端服务：
+
+```bash
+cp dsh-web.sh ~/.local/bin/dsh-web && chmod +x ~/.local/bin/dsh-web
+export DSH_WEB_REMOTE=peter@your-server     # 写进 ~/.profile
+dsh-web
+```
+
+它会把本地端口转发到服务器的 loopback，在同一条会话里启动
+`dsh web`，等隧道通了以后把 URL 交给浏览器。Ctrl-C 关闭连接，远端
+进程也随之结束。如果本地 3080 已被占用，它会自动往上找一个空闲端口
+并相应调整 URL，所以本地的 `dsh web` 和远端的可以同时开着。
+
+| 变量 | 默认值 |
+| --- | --- |
+| `DSH_WEB_REMOTE` | *（必填）* `user@host`，或 `~/.ssh/config` 里的别名 |
+| `DSH_WEB_REMOTE_PORT` | `3080`——`dsh` 在服务器上监听的端口 |
+| `DSH_WEB_LOCAL_PORT` | 从远端端口开始往上找到的第一个空闲端口 |
+| `DSH_WEB_OPEN` | `1`；设为 `0` 则不打开浏览器 |
+
+`--` 之后的参数会原样传给 `dsh web`：
+`dsh-web myhost -- --trusted-host example.test`。
+
+这个脚本要绕开的一个坑：`dsh` 装在 nvm 下面，而 nvm 的 PATH 设置写在
+`~/.bashrc` 里，Ubuntu 自带的判断会让非交互式 shell 直接跳过它。
+所以直接执行 `ssh host dsh web` 会报 `command not found`。脚本在找不到
+`dsh` 时会显式 source 一次 `nvm.sh`。
 
 ---
 
