@@ -50,9 +50,9 @@ about that step is Copilot-specific.
 
 We use the **`@jeffreycao/copilot-api`** fork, which adds native
 Anthropic-Messages support, exposes newer upstream models
-(`claude-opus-4.8`, `claude-sonnet-4.6`, `gemini-3.5-flash`,
-`gpt-5.3-codex`, `gpt-5.4`, `gpt-5.5`), and ships a built-in usage
-dashboard. The local setup here is on `@jeffreycao/copilot-api@1.10.28`.
+(`claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, `gpt-5.6-sol`,
+`gpt-5.3-codex`, `kimi-k3`, `grok-4.6`), and ships a built-in usage
+dashboard. The local setup here is on `@jeffreycao/copilot-api@2.2.7`.
 
 ```bash
 npm install -g @jeffreycao/copilot-api
@@ -171,10 +171,10 @@ claude-c() (
     export CLAUDE_CONFIG_DIR="$HOME/.claude-copilot" \
         ANTHROPIC_BASE_URL=http://localhost:4141 \
         ANTHROPIC_AUTH_TOKEN=dummy \
-        ANTHROPIC_MODEL=claude-opus-4.8 \
-        ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.6 \
-        ANTHROPIC_SMALL_FAST_MODEL=gemini-3.5-flash \
-        ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.5-flash \
+        ANTHROPIC_MODEL=claude-fable-5 \
+        ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5 \
+        ANTHROPIC_SMALL_FAST_MODEL=gemini-3.7-flash \
+        ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.7-flash \
         DISABLE_NON_ESSENTIAL_MODEL_CALLS=1 \
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
     exec /home/peter/.local/bin/claude --effort high "$@"
@@ -184,6 +184,12 @@ claude-c() (
 alias claude-d='unset CLAUDE_CONFIG_DIR ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL DISABLE_NON_ESSENTIAL_MODEL_CALLS CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC && /home/peter/.local/bin/claude'
 ```
 
+> **Note:** the two fast-lane aliases must name a model that is on the
+> current gateway list. Copilot dropped `claude-haiku-4.5`, and anything
+> the gateway no longer exposes fails every background call with
+> `model_not_supported`. This setup uses `gemini-3.7-flash`;
+> `gpt-5.6-luna` and `mai-code-1.1-flash` are the other cheap choices.
+
 Source the profile (`. ~/.profile` or open a new shell), make sure
 `copilot-api start` is running, and:
 
@@ -192,9 +198,47 @@ claude-c                  # Claude Code, Copilot-billed
 claude-d                  # Claude Code, Anthropic-billed
 ```
 
+### Models exposed by the gateway
+
+`curl -s http://127.0.0.1:4141/v1/models` is the source of truth — the
+upstream list changes without warning. As of 2026-08-19, on
+`copilot-api@2.2.7`, the proxy routes to these chat models (plus
+`text-embedding-3-small`,
+`text-embedding-3-small-inference`, and `text-embedding-ada-002`):
+
+| Model | Vendor | Context | Max output | Price tier | `reasoning_effort` |
+| --- | --- | --- | --- | --- | --- |
+| `claude-fable-5` | Anthropic | 264K | 64K | very high | low → max |
+| `claude-opus-5` | Anthropic | 264K | 64K | high | low → max |
+| `claude-opus-4-6` | Anthropic | 264K | 64K | high | low/medium/high/max |
+| `claude-sonnet-5` | Anthropic | 264K | 64K | medium | low → max |
+| `gpt-5.6-sol` | OpenAI | 400K | 128K | high | none → max |
+| `gpt-5.6-terra` | OpenAI | 400K | 128K | medium | none → max |
+| `gpt-5.6-luna` | OpenAI | 328K | 128K | low | none → max |
+| `gpt-5.3-codex` | OpenAI | 400K | 128K | medium | low/medium/high/xhigh |
+| `kimi-k3` | Moonshot AI | 1.05M | 131K | medium | low/high/max |
+| `grok-4.6` | xAI | 328K | 128K | medium | low/medium/high/xhigh |
+| `gemini-3.7-flash` | Google | 264K | 64K | low | low/medium/high |
+| `mai-code-1.1-flash` | Microsoft | 256K | 128K | low | low/medium/high |
+
+Two caveats carried in the model metadata itself:
+
+- `claude-opus-4-6` is flagged `model_pending_deprecation` with a
+  planned removal date of **2026-09-01**.
+- `claude-fable-5`, `claude-opus-5`, and `gpt-5.6-sol` are restricted to
+  Copilot **Pro+ / Business / Enterprise / Max**; `gpt-5.6-luna` and
+  `mai-code-1.1-flash` are the only two available on the free tier.
+
+Note the ID shape: since `copilot-api@1.11.4` the gateway hyphenates
+Claude model IDs, so Opus 4.6 is `claude-opus-4-6` here even though
+Copilot upstream calls it `claude-opus-4.6`. Other vendors' IDs keep
+their dots. Always copy IDs out of `/v1/models` rather than typing them.
+
+Exact per-token prices live in each entry's `billing.token_prices`.
+
 ### Model and thinking level
 
-`claude-c` starts on `claude-opus-4.8` and asks Claude Code for high
+`claude-c` starts on `claude-fable-5` and asks Claude Code for high
 effort by default:
 
 ```bash
@@ -204,13 +248,14 @@ claude-c
 To start on another model, pass Claude Code's model flag:
 
 ```bash
-claude-c --model claude-sonnet-4.6
-claude-c --model gemini-3.5-flash
+claude-c --model claude-sonnet-5
+claude-c --model gemini-3.7-flash
 ```
 
 Inside the REPL, use `/model` to switch between the models exposed by
 the Anthropic-compatible route. For this setup, the practical choices
-are `claude-opus-4.8`, `claude-sonnet-4.6`, and `gemini-3.5-flash`.
+are `claude-fable-5`, `claude-opus-5`, `claude-sonnet-5`, and
+`gemini-3.7-flash`.
 
 Thinking level can be adjusted inside the REPL with `/effort`, for
 example:
@@ -231,12 +276,14 @@ Claude Code also stores Copilot-mode settings under
 `~/.claude-copilot/settings.json`; this setup keeps `effortLevel` at
 `high`.
 
-One important gateway detail: GitHub Copilot's model metadata currently
-advertises `claude-opus-4.8` with only `reasoning_effort=["medium"]`.
-The gateway clamps unsupported Anthropic Messages effort to the
-advertised model capability, so Opus 4.8 receives medium effort even
-though `claude-c` requests high. `claude-sonnet-4.6` and
-`gemini-3.5-flash` advertise high effort and can honor it.
+One important gateway detail: the proxy clamps an Anthropic-Messages
+effort request to whatever the upstream model advertises in its
+metadata, silently. The Claude 5 family (`claude-fable-5`,
+`claude-opus-5`, `claude-sonnet-5`) currently advertises the full
+`low/medium/high/xhigh/max` range, so `claude-c --effort high` is
+honored end to end. Watch the others: `claude-opus-4-6` has no `xhigh`,
+`kimi-k3` advertises only `low/high/max`, and `gemini-3.7-flash` and
+`mai-code-1.1-flash` cap out at `high`.
 
 `curl http://127.0.0.1:4141/v1/models` shows the local gateway's
 OpenAI-compatible view. To inspect the original GitHub Copilot model
@@ -305,17 +352,17 @@ For a compact check of the models used by `claude-c`:
 
 ```bash
 curl -s http://127.0.0.1:4141/v1/models |
-  node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); for (const id of ["claude-opus-4.8","claude-sonnet-4.6","gemini-3.5-flash"]) { const m=(j.data||[]).find(x=>x.id===id); console.log(id, m?.capabilities?.supports?.reasoning_effort || null); }})'
+  node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); for (const id of ["claude-fable-5","claude-sonnet-5","gemini-3.7-flash"]) { const m=(j.data||[]).find(x=>x.id===id); console.log(id, m?.capabilities?.supports?.reasoning_effort || null); }})'
 ```
 
 To update the models used by `claude-c`, edit the model aliases in
 `~/.profile`:
 
 ```bash
-ANTHROPIC_MODEL=claude-opus-4.8
-ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.6
-ANTHROPIC_SMALL_FAST_MODEL=gemini-3.5-flash
-ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.5-flash
+ANTHROPIC_MODEL=claude-fable-5
+ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5
+ANTHROPIC_SMALL_FAST_MODEL=gemini-3.7-flash
+ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.7-flash
 ```
 
 Then reload the shell config or open a new shell:

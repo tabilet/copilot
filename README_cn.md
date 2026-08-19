@@ -47,10 +47,10 @@ Claude Code CLI 已经在磁盘上：
 #### 第 2 步 —— 安装 `copilot-api`
 
 这里使用 **`@jeffreycao/copilot-api`** 这个 fork。它增加了原生
-Anthropic Messages 支持，暴露更新的上游模型（`claude-opus-4.8`、
-`claude-sonnet-4.6`、`gemini-3.5-flash`、`gpt-5.3-codex`、
-`gpt-5.4`、`gpt-5.5`），并内置用量面板。本机当前使用的是
-`@jeffreycao/copilot-api@1.10.28`。
+Anthropic Messages 支持，暴露更新的上游模型（`claude-fable-5`、
+`claude-opus-5`、`claude-sonnet-5`、`gpt-5.6-sol`、
+`gpt-5.3-codex`、`kimi-k3`、`grok-4.6`），并内置用量面板。本机当前使用的是
+`@jeffreycao/copilot-api@2.2.7`。
 
 ```bash
 npm install -g @jeffreycao/copilot-api
@@ -161,10 +161,10 @@ claude-c() (
     export CLAUDE_CONFIG_DIR="$HOME/.claude-copilot" \
         ANTHROPIC_BASE_URL=http://localhost:4141 \
         ANTHROPIC_AUTH_TOKEN=dummy \
-        ANTHROPIC_MODEL=claude-opus-4.8 \
-        ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.6 \
-        ANTHROPIC_SMALL_FAST_MODEL=gemini-3.5-flash \
-        ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.5-flash \
+        ANTHROPIC_MODEL=claude-fable-5 \
+        ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5 \
+        ANTHROPIC_SMALL_FAST_MODEL=gemini-3.7-flash \
+        ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.7-flash \
         DISABLE_NON_ESSENTIAL_MODEL_CALLS=1 \
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
     exec /home/peter/.local/bin/claude --effort high "$@"
@@ -174,6 +174,12 @@ claude-c() (
 alias claude-d='unset CLAUDE_CONFIG_DIR ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL DISABLE_NON_ESSENTIAL_MODEL_CALLS CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC && /home/peter/.local/bin/claude'
 ```
 
+> **注意：** 这两个 fast 通道别名必须指向当前网关列表里存在的模型。
+> Copilot 已经下线了 `claude-haiku-4.5`，指向网关不再暴露的模型会让所有
+> 后台调用都返回 `model_not_supported`。这套配置用的是
+> `gemini-3.7-flash`；`gpt-5.6-luna` 和 `mai-code-1.1-flash` 是另外两个
+> 便宜的选择。
+
 加载 profile（`. ~/.profile` 或打开一个新 shell），确认
 `copilot-api start` 正在运行，然后执行：
 
@@ -182,9 +188,46 @@ claude-c                  # Claude Code，计入 Copilot
 claude-d                  # Claude Code，计入 Anthropic
 ```
 
+### 网关当前暴露的模型
+
+`curl -s http://127.0.0.1:4141/v1/models` 才是准确来源——上游列表会在
+没有通知的情况下变动。截至 2026-08-19（`copilot-api@2.2.7`），本机代理
+可以路由到下面这些对话模型（另外还有 `text-embedding-3-small`、
+`text-embedding-3-small-inference` 和 `text-embedding-ada-002`）：
+
+| 模型 | 厂商 | 上下文 | 最大输出 | 价格档 | `reasoning_effort` |
+| --- | --- | --- | --- | --- | --- |
+| `claude-fable-5` | Anthropic | 264K | 64K | very high | low → max |
+| `claude-opus-5` | Anthropic | 264K | 64K | high | low → max |
+| `claude-opus-4-6` | Anthropic | 264K | 64K | high | low/medium/high/max |
+| `claude-sonnet-5` | Anthropic | 264K | 64K | medium | low → max |
+| `gpt-5.6-sol` | OpenAI | 400K | 128K | high | none → max |
+| `gpt-5.6-terra` | OpenAI | 400K | 128K | medium | none → max |
+| `gpt-5.6-luna` | OpenAI | 328K | 128K | low | none → max |
+| `gpt-5.3-codex` | OpenAI | 400K | 128K | medium | low/medium/high/xhigh |
+| `kimi-k3` | Moonshot AI | 1.05M | 131K | medium | low/high/max |
+| `grok-4.6` | xAI | 328K | 128K | medium | low/medium/high/xhigh |
+| `gemini-3.7-flash` | Google | 264K | 64K | low | low/medium/high |
+| `mai-code-1.1-flash` | Microsoft | 256K | 128K | low | low/medium/high |
+
+模型元数据里带的两个提醒：
+
+- `claude-opus-4-6` 已被标记为 `model_pending_deprecation`，计划下线日期
+  是 **2026-09-01**；
+- `claude-fable-5`、`claude-opus-5` 和 `gpt-5.6-sol` 仅限 Copilot
+  **Pro+ / Business / Enterprise / Max**；免费档只有 `gpt-5.6-luna` 和
+  `mai-code-1.1-flash` 可用。
+
+注意模型 ID 的写法：从 `copilot-api@1.11.4` 开始，网关会把 Claude 的模型
+ID 转成连字符形式，所以 Opus 4.6 在这里是 `claude-opus-4-6`，而 Copilot
+上游叫它 `claude-opus-4.6`。其他厂商的 ID 仍然保留小数点。用模型 ID 时
+最好直接从 `/v1/models` 里复制，不要手写。
+
+每个条目的 `billing.token_prices` 里有精确的 token 单价。
+
 ### 模型和 thinking level
 
-`claude-c` 默认从 `claude-opus-4.8` 启动，并请求 Claude Code 使用 high
+`claude-c` 默认从 `claude-fable-5` 启动，并请求 Claude Code 使用 high
 effort：
 
 ```bash
@@ -194,13 +237,13 @@ claude-c
 如果要启动时指定另一个模型，可以传 Claude Code 的 model 参数：
 
 ```bash
-claude-c --model claude-sonnet-4.6
-claude-c --model gemini-3.5-flash
+claude-c --model claude-sonnet-5
+claude-c --model gemini-3.7-flash
 ```
 
 进入 REPL 后，可以用 `/model` 在 Anthropic 兼容路由暴露的模型之间切换。
-在这套配置里，实际常用的选择是 `claude-opus-4.8`、
-`claude-sonnet-4.6` 和 `gemini-3.5-flash`。
+在这套配置里，实际常用的选择是 `claude-fable-5`、`claude-opus-5`、
+`claude-sonnet-5` 和 `gemini-3.7-flash`。
 
 Thinking level 可以在 REPL 里用 `/effort` 调整，例如：
 
@@ -220,12 +263,13 @@ Claude Code 会把 Copilot 模式的设置写在
 `~/.claude-copilot/settings.json`；这套配置把 `effortLevel` 保持为
 `high`。
 
-需要注意一个代理层细节：GitHub Copilot 当前返回的模型元数据中，
-`claude-opus-4.8` 只声明 `reasoning_effort=["medium"]`。代理会把
-Anthropic Messages 中不受支持的 effort 限制到模型声明的能力内，所以
-即使 `claude-c` 请求 high，Opus 4.8 实际发送给上游的也是 medium。
-`claude-sonnet-4.6` 和 `gemini-3.5-flash` 声明支持 high effort，因此可以
-按 high effort 工作。
+需要注意一个代理层细节：代理会把 Anthropic Messages 请求里的 effort
+静默地压到上游模型元数据声明的能力范围内。目前 Claude 5 系列
+（`claude-fable-5`、`claude-opus-5`、`claude-sonnet-5`）声明了完整的
+`low/medium/high/xhigh/max`，所以 `claude-c --effort high` 可以端到端
+生效。其他模型要留意：`claude-opus-4-6` 没有 `xhigh`，`kimi-k3` 只声明
+`low/high/max`，而 `gemini-3.7-flash` 和 `mai-code-1.1-flash` 最高只到
+`high`。
 
 `curl http://127.0.0.1:4141/v1/models` 看到的是本地代理转换后的
 OpenAI 兼容视图。如果要查看 GitHub Copilot 原始的模型报告，需要先把
@@ -294,16 +338,16 @@ curl -s http://127.0.0.1:4141/v1/models |
 
 ```bash
 curl -s http://127.0.0.1:4141/v1/models |
-  node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); for (const id of ["claude-opus-4.8","claude-sonnet-4.6","gemini-3.5-flash"]) { const m=(j.data||[]).find(x=>x.id===id); console.log(id, m?.capabilities?.supports?.reasoning_effort || null); }})'
+  node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); for (const id of ["claude-fable-5","claude-sonnet-5","gemini-3.7-flash"]) { const m=(j.data||[]).find(x=>x.id===id); console.log(id, m?.capabilities?.supports?.reasoning_effort || null); }})'
 ```
 
 如果要更新 `claude-c` 使用的模型，编辑 `~/.profile` 里的这些模型别名：
 
 ```bash
-ANTHROPIC_MODEL=claude-opus-4.8
-ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.6
-ANTHROPIC_SMALL_FAST_MODEL=gemini-3.5-flash
-ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.5-flash
+ANTHROPIC_MODEL=claude-fable-5
+ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5
+ANTHROPIC_SMALL_FAST_MODEL=gemini-3.7-flash
+ANTHROPIC_DEFAULT_HAIKU_MODEL=gemini-3.7-flash
 ```
 
 然后重新加载 shell 配置，或者打开一个新 shell：
