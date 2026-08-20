@@ -210,21 +210,62 @@ dsh-web
 It forwards a local port to the server's loopback, starts `dsh web`
 over the same session, waits for the tunnel to answer, and hands the URL
 to your browser. Ctrl-C closes the connection and stops the remote
-process with it. If your local 3080 is busy it moves up to the next free
-port and adjusts the URL, so a local `dsh web` and a remote one can run
-side by side.
+process with it. If the port is busy locally it moves **both ends** to
+the next free number — see the authority fence below for why they cannot
+differ.
 
 | Variable | Default |
 | --- | --- |
 | `DSH_WEB_REMOTE` | *(required)* `user@host`, or an `~/.ssh/config` alias |
-| `DSH_WEB_REMOTE_PORT` | `3080` — what `dsh` binds on the server |
-| `DSH_WEB_LOCAL_PORT` | first free port at or above the remote port |
+| `DSH_WEB_PORT` | `3080`, used on both ends |
 | `DSH_WEB_OPEN` | `1`; set `0` to skip the browser |
+| `DSH_WEB_REPLACE` | `0`; `1` (or `--replace`) stops a server already holding the remote port |
+
+Before opening anything, it asks the server whether that port is free.
+If a server is already there — the common case being one you left
+running from an earlier session — it names the process and stops:
+
+```
+dsh-web: port 3080 on peter@yixin is already in use by:
+  534382 node /home/peter/.nvm/.../dsh web --port 3080
+dsh-web: use --replace to stop it, or set DSH_WEB_PORT to another port
+```
+
+That check matters more than it sounds. Without it the tunnel comes up
+first and the remote `dsh web` dies of `EADDRINUSE` afterwards, so the
+browser quietly reaches the *older* process instead — and if that one
+was started on a different port, you get the endless spinner from the
+section below. `--replace` stops the holder and waits for the port
+before continuing; it is opt-in because that process may be a session
+someone else is using.
 
 Arguments after `--` reach `dsh web` itself:
 `dsh-web myhost -- --trusted-host example.test`.
 
-One thing the script exists to work around: `dsh` is installed under
+### The authority fence, and the spinner that never resolves
+
+The web UI serves its static files to anyone, but fences `/api` to the
+server's **own authority**. Tested against a server bound to
+`127.0.0.1:3080`:
+
+| Browser origin | `POST /api` | `WS /api/events.host` |
+| --- | --- | --- |
+| `http://127.0.0.1:3080` | passes | `101` |
+| `http://127.0.0.1:3081` | `403` | `403` |
+| `http://localhost:3080` | `403` | `403` |
+
+So a tunnel whose local port differs from the server's port produces a
+page that renders and then spins forever: the HTML and JS arrive, and
+every API call and both event WebSockets come back `403`. Browsing
+`http://localhost:PORT` instead of `http://127.0.0.1:PORT` does the same
+thing — different authority, same 403.
+
+Two rules follow: **forward port N to port N**, and **use the printed
+`127.0.0.1` URL**. Note that `--trusted-host` does not rescue a
+mismatch here; on a loopback bind, adding `127.0.0.1:3081` or a bare
+`127.0.0.1` still left the fence at 403 in testing.
+
+One more thing the script exists to work around: `dsh` is installed under
 nvm, and nvm's PATH setup lives in `~/.bashrc`, which Ubuntu's own guard
 skips for non-interactive shells. A plain `ssh host dsh web` therefore
 fails with `command not found`. The script sources `nvm.sh` explicitly
@@ -339,6 +380,9 @@ minimumReleaseAgeStrict: true
 | `GitHub Copilot: no GitHub OAuth token` | not signed in on this machine | `/copilot-login`, or export `GITHUB_COPILOT_OAUTH_TOKEN` |
 | Override ignored, no warning | edited `cordis.yml` instead of `cordis.patch.yml` | `cordis.yml` is the generated root; your layer is the patch file |
 | `dsh` usage missing from the `copilot-api` dashboard | the adapter bypasses the `:4141` proxy | expected; see [Billing visibility](#billing-visibility) |
+| Tunnel connects but the UI is someone else's session | a stale `dsh web` still holds the port | `dsh-web --replace`, or `ssh <host> "pkill -f '[d]sh web'"` |
+| Web UI renders, then spins forever | `/api` is fenced to the server's own authority; your tunnel port or hostname differs | forward port N to port N, and browse `http://127.0.0.1:N` |
+| `dsh web` "hangs" | it is a foreground server, not a command that returns | expected; Ctrl-C stops it |
 
 ## Command reference
 

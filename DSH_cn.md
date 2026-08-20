@@ -199,20 +199,57 @@ dsh-web
 
 它会把本地端口转发到服务器的 loopback，在同一条会话里启动
 `dsh web`，等隧道通了以后把 URL 交给浏览器。Ctrl-C 关闭连接，远端
-进程也随之结束。如果本地 3080 已被占用，它会自动往上找一个空闲端口
-并相应调整 URL，所以本地的 `dsh web` 和远端的可以同时开着。
+进程也随之结束。如果这个端口在本地被占用，它会把**两端一起**挪到
+下一个空闲端口号——原因见下面的 authority 校验。
 
 | 变量 | 默认值 |
 | --- | --- |
 | `DSH_WEB_REMOTE` | *（必填）* `user@host`，或 `~/.ssh/config` 里的别名 |
-| `DSH_WEB_REMOTE_PORT` | `3080`——`dsh` 在服务器上监听的端口 |
-| `DSH_WEB_LOCAL_PORT` | 从远端端口开始往上找到的第一个空闲端口 |
+| `DSH_WEB_PORT` | `3080`，两端使用同一个端口 |
 | `DSH_WEB_OPEN` | `1`；设为 `0` 则不打开浏览器 |
+| `DSH_WEB_REPLACE` | `0`；设为 `1`（或用 `--replace`）会先停掉已占用远端端口的进程 |
+
+在做任何事情之前，它会先问服务器那个端口是不是空的。如果上面已经有
+一个服务在跑——最常见的情况是上次留下来没关的——它会把那个进程打印
+出来然后退出：
+
+```
+dsh-web: port 3080 on peter@yixin is already in use by:
+  534382 node /home/peter/.nvm/.../dsh web --port 3080
+dsh-web: use --replace to stop it, or set DSH_WEB_PORT to another port
+```
+
+这个检查比看上去重要：没有它的话，隧道会先建立起来，远端的
+`dsh web` 随后才因为 `EADDRINUSE` 挂掉，于是浏览器悄悄连到了**旧的**
+那个进程；如果旧进程当初监听的是另一个端口，你看到的就是下一节说的
+「一直转圈」。`--replace` 会停掉占用者并等端口释放再继续；它必须显式
+指定，因为那个进程有可能是别人正在用的会话。
 
 `--` 之后的参数会原样传给 `dsh web`：
 `dsh-web myhost -- --trusted-host example.test`。
 
-这个脚本要绕开的一个坑：`dsh` 装在 nvm 下面，而 nvm 的 PATH 设置写在
+### authority 校验，以及「转圈转不停」
+
+web UI 的静态文件对谁都放行，但 `/api` 会被限制在服务器**自身的
+authority** 上。针对绑定在 `127.0.0.1:3080` 的服务器实测：
+
+| 浏览器 origin | `POST /api` | `WS /api/events.host` |
+| --- | --- | --- |
+| `http://127.0.0.1:3080` | 通过 | `101` |
+| `http://127.0.0.1:3081` | `403` | `403` |
+| `http://localhost:3080` | `403` | `403` |
+
+所以只要隧道的本地端口和服务器端口不一致，页面就会「打开了，然后
+一直转圈」：HTML 和 JS 都能加载，但所有 API 调用和两个事件
+WebSocket 全部返回 `403`。用 `http://localhost:PORT` 而不是
+`http://127.0.0.1:PORT` 也是一样的结果——authority 不同，同样 403。
+
+由此有两条规则：**端口 N 转发到端口 N**，以及**用打印出来的
+`127.0.0.1` 地址**。另外，`--trusted-host` 救不了这种不一致：在
+loopback 绑定下，实测加上 `127.0.0.1:3081` 或者不带端口的
+`127.0.0.1`，校验依旧是 403。
+
+这个脚本要绕开的另一个坑：`dsh` 装在 nvm 下面，而 nvm 的 PATH 设置写在
 `~/.bashrc` 里，Ubuntu 自带的判断会让非交互式 shell 直接跳过它。
 所以直接执行 `ssh host dsh web` 会报 `command not found`。脚本在找不到
 `dsh` 时会显式 source 一次 `nvm.sh`。
@@ -321,6 +358,9 @@ minimumReleaseAgeStrict: true
 | `GitHub Copilot: no GitHub OAuth token` | 这台机器还没登录 | `/copilot-login`，或导出 `GITHUB_COPILOT_OAUTH_TOKEN` |
 | 覆盖不生效，也没有警告 | 改的是 `cordis.yml` 而不是 `cordis.patch.yml` | `cordis.yml` 是生成的根文件，你的层是 patch 文件 |
 | `copilot-api` 面板里看不到 `dsh` 的用量 | 适配器绕过了 `:4141` 代理 | 属于预期，见[用量可见性](#用量可见性) |
+| 隧道通了，但界面是别人的会话 | 还有一个没关掉的 `dsh web` 占着端口 | `dsh-web --replace`，或 `ssh <host> "pkill -f '[d]sh web'"` |
+| web UI 打开后一直转圈 | `/api` 被限制在服务器自身的 authority；隧道端口或主机名不一致 | 端口 N 转发到端口 N，并用 `http://127.0.0.1:N` 访问 |
+| `dsh web` 好像「卡住」 | 它是前台服务进程，本来就不会返回 | 属于预期；Ctrl-C 结束 |
 
 ## 命令速查
 
