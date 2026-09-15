@@ -17,7 +17,8 @@ Copilot 订阅** 上计费，而不是走 DeepSeek API，并且在终端里使�
 另外还有 [`dsh-web.sh`](dsh-web.sh)：跑在你自己电脑上的启动器，
 自动建立到服务器 web UI 的隧道并打开浏览器。
 
-本文对应的版本：`@deepseek-ai/dsh@0.1.0-rc.7`、
+本文对应的版本：`@deepseek-ai/dsh@0.1.5-rc.1`
+（profile 和 authority 校验两节最初是照着 `0.1.0-rc.7` 写的）、
 `@lujianjun19/dsh-llm-github-copilot@0.3.6`、
 `@deepseek-harness-tui/dsh-tui@0.8.4`。这套生态每天都在变。
 
@@ -198,7 +199,9 @@ dsh-web
 ```
 
 它会把本地端口转发到服务器的 loopback，在同一条会话里启动
-`dsh web`，等隧道通了以后把 URL 交给浏览器。Ctrl-C 关闭连接，远端
+`dsh web`，然后等服务器打印出它自己那条带一次性 token 的 URL，并且
+只打开那一条。在这行出现之前它什么都不会打开——因为不带 token 的
+地址只会返回 401，也就是一个空白页。Ctrl-C 关闭连接，远端
 进程也随之结束。如果这个端口在本地被占用，它会把**两端一起**挪到
 下一个空闲端口号——原因见下面的 authority 校验。
 
@@ -228,26 +231,35 @@ dsh-web: use --replace to stop it, or set DSH_WEB_PORT to another port
 `--` 之后的参数会原样传给 `dsh web`：
 `dsh-web myhost -- --trusted-host example.test`。
 
-### authority 校验，以及「转圈转不停」
+### token URL，以及打不开的页面
 
-web UI 的静态文件对谁都放行，但 `/api` 会被限制在服务器**自身的
-authority** 上。针对绑定在 `127.0.0.1:3080` 的服务器实测：
+能不能拿到可用的界面，取决于两道互相独立的关卡。
 
-| 浏览器 origin | `POST /api` | `WS /api/events.host` |
-| --- | --- | --- |
-| `http://127.0.0.1:3080` | 通过 | `101` |
-| `http://127.0.0.1:3081` | `403` | `403` |
-| `http://localhost:3080` | `403` | `403` |
+**会话 token。** 从 `0.1.5-rc.1` 开始，服务器启动时会打印一条带
+一次性 token 的地址，其他请求一律拒绝。在 `0.1.5-rc.1`、服务器绑定
+`127.0.0.1:3099` 上实测：
 
-所以只要隧道的本地端口和服务器端口不一致，页面就会「打开了，然后
-一直转圈」：HTML 和 JS 都能加载，但所有 API 调用和两个事件
-WebSocket 全部返回 `403`。用 `http://localhost:PORT` 而不是
-`http://127.0.0.1:PORT` 也是一样的结果——authority 不同，同样 403。
+| 请求 | 结果 |
+| --- | --- |
+| `GET /` | `401`——一个空白页 |
+| `GET /?token=<打印出来的>` | `303`，会话建立 |
+| 没有会话的 `WS /api/events.host` | 连接直接断开，没有 HTTP 状态码 |
 
-由此有两条规则：**端口 N 转发到端口 N**，以及**用打印出来的
-`127.0.0.1` 地址**。另外，`--trusted-host` 救不了这种不一致：在
-loopback 绑定下，实测加上 `127.0.0.1:3081` 或者不带端口的
-`127.0.0.1`，校验依旧是 403。
+所以要打开服务器打印的那条 URL，而不是你转发到的那个地址。
+`dsh-web.sh` 会自动帮你打开；手工操作就复制 `dsh web` 启动时写出的
+那一行。
+
+**authority。** `/api` 同时还被限制在服务器自身的 authority 上。在
+还能不带会话测出来的 `0.1.0-rc.7` 上：绑定 `127.0.0.1:3080` 的服务器
+对 origin 为 `http://127.0.0.1:3080` 的事件 WebSocket 返回 `101`，而对
+`http://127.0.0.1:3081` 和 `http://localhost:3080` 都返回 `403`。这就是
+为什么隧道本地端口和服务器端口不一致时，页面会「打开了，然后一直
+转圈」。
+
+由此得到的两条规则到现在依然成立：**端口 N 转发到端口 N**，以及
+**用打印出来的 `127.0.0.1` 地址**，不要自己改成 `localhost`。另外，
+`--trusted-host` 救不了这种不一致：在 loopback 绑定下，实测加上
+`127.0.0.1:3081` 或者不带端口的 `127.0.0.1`，校验依旧会拒绝。
 
 这个脚本要绕开的另一个坑：`dsh` 装在 nvm 下面，而 nvm 的 PATH 设置写在
 `~/.bashrc` 里，Ubuntu 自带的判断会让非交互式 shell 直接跳过它。
@@ -359,6 +371,7 @@ minimumReleaseAgeStrict: true
 | 覆盖不生效，也没有警告 | 改的是 `cordis.yml` 而不是 `cordis.patch.yml` | `cordis.yml` 是生成的根文件，你的层是 patch 文件 |
 | `copilot-api` 面板里看不到 `dsh` 的用量 | 适配器绕过了 `:4141` 代理 | 属于预期，见[用量可见性](#用量可见性) |
 | 隧道通了，但界面是别人的会话 | 还有一个没关掉的 `dsh web` 占着端口 | `dsh-web --replace`，或 `ssh <host> "pkill -f '[d]sh web'"` |
+| 浏览器标签页空白，或提示 401 | 打开的是不带 token 的地址，服务器要的是它打印的那条 URL | 打开 `dsh web` 打印的 URL，或者交给 `dsh-web.sh` 打开 |
 | web UI 打开后一直转圈 | `/api` 被限制在服务器自身的 authority；隧道端口或主机名不一致 | 端口 N 转发到端口 N，并用 `http://127.0.0.1:N` 访问 |
 | `dsh web` 好像「卡住」 | 它是前台服务进程，本来就不会返回 | 属于预期；Ctrl-C 结束 |
 

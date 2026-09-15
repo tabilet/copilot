@@ -17,7 +17,8 @@ Two independent parts:
 Plus [`dsh-web.sh`](dsh-web.sh), a launcher for your own machine that
 tunnels to the server's web UI and opens it in your browser.
 
-Versions this was written against: `@deepseek-ai/dsh@0.1.0-rc.7`,
+Versions this was written against: `@deepseek-ai/dsh@0.1.5-rc.1`
+(the profile and fence sections were first written against `0.1.0-rc.7`),
 `@lujianjun19/dsh-llm-github-copilot@0.3.6`,
 `@deepseek-harness-tui/dsh-tui@0.8.4`. This ecosystem moves daily.
 
@@ -208,8 +209,10 @@ dsh-web
 ```
 
 It forwards a local port to the server's loopback, starts `dsh web`
-over the same session, waits for the tunnel to answer, and hands the URL
-to your browser. Ctrl-C closes the connection and stops the remote
+over the same session, then waits for the server to print its own URL —
+which carries a one-time token — and opens exactly that. It opens
+nothing before that line arrives, because the bare address answers 401:
+a blank tab. Ctrl-C closes the connection and stops the remote
 process with it. If the port is busy locally it moves **both ends** to
 the next free number — see the authority fence below for why they cannot
 differ.
@@ -242,28 +245,37 @@ someone else is using.
 Arguments after `--` reach `dsh web` itself:
 `dsh-web myhost -- --trusted-host example.test`.
 
-### The authority fence, and the spinner that never resolves
+### The token URL, and pages that never come up
 
-The web UI serves its static files to anyone, but fences `/api` to the
-server's **own authority**. Tested against a server bound to
-`127.0.0.1:3080`:
+Two separate gates decide whether the browser gets a working UI.
 
-| Browser origin | `POST /api` | `WS /api/events.host` |
-| --- | --- | --- |
-| `http://127.0.0.1:3080` | passes | `101` |
-| `http://127.0.0.1:3081` | `403` | `403` |
-| `http://localhost:3080` | `403` | `403` |
+**The session token.** Since `0.1.5-rc.1` the server prints its address
+with a one-time token and refuses everything else. Measured on
+`0.1.5-rc.1`, server bound to `127.0.0.1:3099`:
 
-So a tunnel whose local port differs from the server's port produces a
-page that renders and then spins forever: the HTML and JS arrive, and
-every API call and both event WebSockets come back `403`. Browsing
-`http://localhost:PORT` instead of `http://127.0.0.1:PORT` does the same
-thing — different authority, same 403.
+| Request | Result |
+| --- | --- |
+| `GET /` | `401` — a blank tab |
+| `GET /?token=<printed>` | `303`, session established |
+| `WS /api/events.host`, no session | connection dropped, no HTTP status |
 
-Two rules follow: **forward port N to port N**, and **use the printed
-`127.0.0.1` URL**. Note that `--trusted-host` does not rescue a
-mismatch here; on a loopback bind, adding `127.0.0.1:3081` or a bare
-`127.0.0.1` still left the fence at 403 in testing.
+So open the URL the server prints, not the address you tunnelled to.
+`dsh-web.sh` does this for you; by hand, copy the line `dsh web` writes
+at startup.
+
+**The authority.** `/api` is also fenced to the server's own authority.
+On `0.1.0-rc.7`, where this was measurable without a session, a server
+on `127.0.0.1:3080` upgraded the event WebSocket for an origin of
+`http://127.0.0.1:3080` (`101`) and answered `403` for both
+`http://127.0.0.1:3081` and `http://localhost:3080`. That is why a
+tunnel whose local port differs from the server's port used to render a
+page and then spin forever.
+
+Two rules follow, and they still hold: **forward port N to port N**, and
+**use the printed `127.0.0.1` URL** rather than retyping `localhost`.
+`--trusted-host` does not rescue a mismatch; on a loopback bind, adding
+`127.0.0.1:3081` or a bare `127.0.0.1` still left the fence refusing in
+testing.
 
 One more thing the script exists to work around: `dsh` is installed under
 nvm, and nvm's PATH setup lives in `~/.bashrc`, which Ubuntu's own guard
@@ -381,6 +393,7 @@ minimumReleaseAgeStrict: true
 | Override ignored, no warning | edited `cordis.yml` instead of `cordis.patch.yml` | `cordis.yml` is the generated root; your layer is the patch file |
 | `dsh` usage missing from the `copilot-api` dashboard | the adapter bypasses the `:4141` proxy | expected; see [Billing visibility](#billing-visibility) |
 | Tunnel connects but the UI is someone else's session | a stale `dsh web` still holds the port | `dsh-web --replace`, or `ssh <host> "pkill -f '[d]sh web'"` |
+| Browser tab is blank, or says 401 | you opened the bare address; the server wants its token URL | open the URL `dsh web` printed, or let `dsh-web.sh` open it |
 | Web UI renders, then spins forever | `/api` is fenced to the server's own authority; your tunnel port or hostname differs | forward port N to port N, and browse `http://127.0.0.1:N` |
 | `dsh web` "hangs" | it is a foreground server, not a command that returns | expected; Ctrl-C stops it |
 

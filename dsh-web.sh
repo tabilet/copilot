@@ -19,6 +19,10 @@
 #   DSH_WEB_REPLACE  1 to stop a server already holding the remote port
 #                    (same as --replace; default 0, which reports and exits)
 #
+# The server prints its own URL carrying a one-time token; that printed
+# URL is the one opened, because the bare address answers 401. Nothing
+# is opened until that line arrives.
+#
 # Both ends use the same port number on purpose. The web UI fences its
 # /api routes to its own authority, so a browser reaching it through a
 # tunnel on a different local port is answered with 403 on every API
@@ -87,8 +91,6 @@ done
 [ "$PORT" = "$start_port" ] ||
     echo "dsh-web: local $start_port busy; using $PORT on both ends" >&2
 
-URL="http://127.0.0.1:${PORT}"
-
 # The remote port matters as much as the local one: if something already
 # holds it, our `dsh web` dies with EADDRINUSE *after* the tunnel is up,
 # and the browser silently reaches the other process instead. Check
@@ -149,32 +151,53 @@ command -v dsh >/dev/null 2>&1 || {
 exec dsh web --port ${PORT}${extra}
 "
 
-# Wait for the forwarded port to answer, then hand the URL to the browser.
-open_when_ready() {
-    local waited=0
-    while [ "$waited" -lt 60 ]; do
-        if port_taken "$PORT"; then
-            if command -v xdg-open >/dev/null 2>&1; then
-                xdg-open "$URL" >/dev/null 2>&1 || true
-            elif command -v open >/dev/null 2>&1; then
-                open "$URL" >/dev/null 2>&1 || true
-            fi
-            return
-        fi
-        sleep 1
-        waited=$((waited + 1))
-    done
+open_url() {
+    if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$1" >/dev/null 2>&1 || true
+    elif command -v open >/dev/null 2>&1; then
+        open "$1" >/dev/null 2>&1 || true
+    else
+        return 1
+    fi
 }
 
-# Backgrounded before the exec below replaces this shell: it opens the
-# browser once the tunnel answers, and gives up by itself after 60s.
-[ "$OPEN_BROWSER" != "0" ] && open_when_ready &
+echo "dsh-web: $REMOTE  ${PORT} -> 127.0.0.1:${PORT}   (Ctrl-C stops the remote server)"
 
-echo "dsh-web: $REMOTE  ${PORT} -> 127.0.0.1:${PORT}"
-echo "dsh-web: $URL   (Ctrl-C here stops the remote server)"
-
-exec ssh -t \
-    -L "${PORT}:127.0.0.1:${PORT}" \
-    -o ExitOnForwardFailure=yes \
-    -o ServerAliveInterval=30 \
+ssh_args=(
+    -tt
+    -L "${PORT}:127.0.0.1:${PORT}"
+    -o ExitOnForwardFailure=yes
+    -o ServerAliveInterval=30
     "$REMOTE" "$remote_cmd"
+)
+
+if [ "$OPEN_BROWSER" = "0" ]; then
+    exec ssh "${ssh_args[@]}"
+fi
+
+echo "dsh-web: waiting for the server's token URL before opening a browser"
+
+# `dsh web` prints its own URL with a one-time token; the bare address
+# answers 401, so wait for that line and open exactly what it names.
+# Everything the server writes is relayed through unchanged. Only the
+# first loopback URL is opened, and its authority is rewritten to this
+# end of the tunnel.
+ssh "${ssh_args[@]}" 2>&1 | {
+    opened=0
+    while IFS= read -r line; do
+        clean=$(printf '%s' "$line" | tr -d '\r' | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g')
+        printf '%s\n' "$clean"
+        [ "$opened" = 1 ] && continue
+        url=$(printf '%s' "$clean" |
+            grep -oE 'https?://(127\.0\.0\.1|localhost)(:[0-9]+)?[^[:space:]]*' |
+            head -1) || true
+        [ -n "$url" ] || continue
+        url=$(printf '%s' "$url" | sed -E "s#^https?://[^/]*#http://127.0.0.1:${PORT}#")
+        if open_url "$url"; then
+            echo "dsh-web: opened $url"
+        else
+            echo "dsh-web: no browser opener found; open the URL above yourself" >&2
+        fi
+        opened=1
+    done
+}
